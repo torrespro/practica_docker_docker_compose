@@ -1,0 +1,85 @@
+# Use root/example as user/password credentials
+version: '3.9'
+
+services:
+  mongo:
+    image: mongo:5.0.6-focal
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb_data:/data/db
+
+  mysql:
+    image: mysql:8.0.22
+    environment:
+      - MYSQL_ROOT_PASSWORD=password
+      - MYSQL_DATABASE=eoloplantsDB
+    ports:
+      - "3306:3306"
+    volumes:
+      - demo_mysql_data:/var/lib/mysql
+
+  rabbit:
+    image: rabbitmq:3-management
+    ports:
+      - "5672:5672"
+      - "15672:15672" # Admin UI (http://localhost:15672  .. admin:admin)
+    environment:
+      - RABBITMQ_DEFAULT_USER=admin
+      - RABBITMQ_DEFAULT_PASS=admin
+
+  server:
+    image: torrespro/server:1.0.0
+    ports:
+      - "3000:3000"
+    environment:
+      - MYSQL_HOST=mysql
+      - MYSQL_PORT=3306
+      - MYSQL_DB=eoloplantsDB
+      - NODE_ENV=production
+    depends_on:
+      - mysql
+      - rabbit
+    restart: on-failure
+    command: ["./wait-for-it.sh", "rabbit:5672", "--", "./wait-for-it.sh", "mysql:3306", "--", "node", "src/server.js"]
+    build: server/
+
+  planner:
+    image: torrespro/planner:1.0.0
+    ports:
+      - "8080:8080"
+    environment:
+      - SPRING_CLOUD_STREAM_DEFAULTBINDER=rabbit
+      - SPRING_RABBITMQ_HOST=rabbit
+      - SPRING_RABBITMQ_PORT=5672
+      - SPRING_RABBITMQ_USERNAME=admin
+      - SPRING_RABBITMQ_PASSWORD=admin
+      - APP_CLIENT_TOPO_HOST=toposervice
+      - APP_CLIENT_TOPO_PORT=8181
+      - GRPC_CLIENT_WEATHERSERVER_ADDRESS=static://weatherservice:9090
+    build: planner/
+    depends_on:
+      - rabbit
+
+  toposervice:
+    image: torrespro/toposervice:1.0.0
+    ports:
+      - "8081:8081"
+    environment:
+      - SPRING_DATA_MONGODB_HOST=mongo
+      - SPRING_DATA_MONGODB_PORT=27017
+      - SPRING_DATA_MONGODB_DATABASE=topo
+      - RETRY_MAXATTEMPTS=3
+      - RETRY_MAXDELAY=2000
+    depends_on:
+      - mongo
+
+  weatherservice:
+    image: torrespro/weatherservice:1.0.0
+    ports:
+      - "9090:9090"
+#    build: weatherservice/
+
+volumes:
+  demo_mysql_data:
+  mongodb_data:
